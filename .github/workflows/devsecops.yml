@@ -86,7 +86,7 @@ jobs:
           args: --sarif-file-output=snyk.sarif
 
       - name: Publier le rapport Snyk dans Security
-        if: always()
+        if: always() && hashFiles('snyk.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: snyk.sarif

@@ -32,5 +32,5 @@ npm start
 2. le scan Semgrep,
 3. le scan Snyk,
 4. l'audit npm,
-5. le build Docker + scan Trivy,
+5. le build Docker (toutes branches) + scan Trivy sur `main`,
 6. les vérifications de conformité.
