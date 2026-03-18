@@ -1,0 +1,6 @@
+node_modules
+npm-debug.log
+.git
+.github
+tests
+TP Pipeline DevSecOps avec GitHub Actions.pdf

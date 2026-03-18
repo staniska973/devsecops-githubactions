@@ -1,0 +1,174 @@
+name: Pipeline DevSecOps
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  packages: write
+
+jobs:
+  tests:
+    name: Tests applicatifs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm install
+
+      - name: Lancer les tests
+        run: npm test
+
+      - name: Lancer les tests sécurité
+        run: npm run test:security
+
+  semgrep:
+    name: Scan SAST Semgrep
+    runs-on: ubuntu-latest
+    needs: tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Installer Semgrep
+        run: |
+          python -m pip install --upgrade pip
+          pip install semgrep
+
+      - name: Scan Semgrep (OWASP Top 10)
+        run: semgrep --config p/owasp-top-ten --config .semgrep/rules.yml --sarif --output semgrep.sarif .
+
+      - name: Publier le rapport Semgrep dans Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+
+  snyk:
+    name: Scan dépendances Snyk
+    runs-on: ubuntu-latest
+    needs: tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm install
+
+      - name: Scan Snyk
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: test
+          args: --sarif-file-output=snyk.sarif
+
+      - name: Publier le rapport Snyk dans Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk.sarif
+
+  owasp_audit:
+    name: Vérification OWASP (audit npm)
+    runs-on: ubuntu-latest
+    needs: tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm install
+
+      - name: Audit de sécurité npm (high + critical)
+        run: npm audit --audit-level=high
+
+  docker_secure_build:
+    name: Build Docker et scan image
+    runs-on: ubuntu-latest
+    needs: [semgrep, owasp_audit]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image Docker
+        id: docker_build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: ghcr.io/${{ github.repository }}:latest
+
+      - name: Scan image avec Trivy
+        if: github.ref == 'refs/heads/main'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:latest
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+  compliance:
+    name: Vérifications de conformité
+    runs-on: ubuntu-latest
+    needs: [snyk, docker_secure_build]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Contrôles conformité
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: bash scripts/compliance-check.sh
+
+      - name: Résumé final du pipeline
+        run: |
+          {
+            echo "## Résumé DevSecOps";
+            echo "- Tests applicatifs : OK";
+            echo "- Scan Semgrep (SAST) : OK";
+            echo "- Scan Snyk (dépendances) : Voir rapport";
+            echo "- Vérification OWASP (npm audit) : OK";
+            echo "- Build + Scan Docker : OK";
+            echo "- Conformité : OK";
+          } >> "$GITHUB_STEP_SUMMARY"

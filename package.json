@@ -1,0 +1,19 @@
+{
+  "name": "devsecops-githubactions",
+  "version": "1.0.0",
+  "description": "Mini projet TP DevSecOps avec GitHub Actions",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "jest",
+    "test:security": "jest --runInBand tests/security.test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "helmet": "^8.1.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.1.1"
+  }
+}

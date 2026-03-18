@@ -1,0 +1,28 @@
+rules:
+  - id: no-eval-javascript
+    message: "Éviter eval() (risque injection de code)."
+    severity: ERROR
+    languages: [javascript]
+    pattern: eval(...)
+    metadata:
+      category: security
+      owasp: "A03:2021 - Injection"
+
+  - id: no-dangerously-set-innerhtml
+    message: "Éviter dangerouslySetInnerHTML sans contrôle strict."
+    severity: WARNING
+    languages: [javascript]
+    pattern: dangerouslySetInnerHTML
+    metadata:
+      category: security
+      owasp: "A03:2021 - Injection"
+
+  - id: no-hardcoded-secret
+    message: "Secret potentiellement en dur détecté."
+    severity: ERROR
+    languages: [javascript]
+    patterns:
+      - pattern-regex: "(?i)(api[_-]?key|secret|token)\\s*[:=]\\s*['\"][A-Za-z0-9_\\-]{12,}['\"]"
+    metadata:
+      category: security
+      owasp: "A02:2021 - Cryptographic Failures"
