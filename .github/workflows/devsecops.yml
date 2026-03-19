@@ -13,6 +13,9 @@ permissions:
   packages: write
 
 jobs:
+  # ═══════════════════════════════════════════════════════════════
+  # 1. TESTS - Valide que l'application fonctionne
+  # ═══════════════════════════════════════════════════════════════
   tests:
     name: Tests applicatifs
     runs-on: ubuntu-latest
@@ -30,14 +33,18 @@ jobs:
       - name: Installer les dépendances
         run: npm install
 
-      - name: Lancer les tests
+      - name: Lancer les tests fonctionnels
         run: npm test
 
       - name: Lancer les tests sécurité
         run: npm run test:security
 
-  semgrep:
-    name: Scan SAST Semgrep
+  # ═══════════════════════════════════════════════════════════════
+  # 2. SAST - Analyse statique du code source (Semgrep)
+  #    Détecte : injection, XSS, secrets hardcodés, OWASP Top 10
+  # ═══════════════════════════════════════════════════════════════
+  sast:
+    name: SAST - Semgrep
     runs-on: ubuntu-latest
     needs: tests
 
@@ -50,14 +57,58 @@ jobs:
           python -m pip install --upgrade pip
           pip install semgrep
 
-      - name: Scan Semgrep (OWASP Top 10)
-        run: semgrep --config p/owasp-top-ten --config .semgrep/rules.yml --sarif --output semgrep.sarif .
+      - name: Scan Semgrep (OWASP Top 10 + security-audit + secrets)
+        run: |
+          semgrep \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --config p/secrets \
+            --config .semgrep/rules.yml \
+            --sarif --output semgrep.sarif .
 
       - name: Publier le rapport Semgrep dans Security
+        if: always() && hashFiles('semgrep.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
 
+  # ═══════════════════════════════════════════════════════════════
+  # 3. SCA - Analyse des dépendances npm (Software Composition Analysis)
+  #    Détecte les CVE dans les bibliothèques tierces
+  # ═══════════════════════════════════════════════════════════════
+  sca:
+    name: SCA - Audit npm
+    runs-on: ubuntu-latest
+    needs: tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm install
+
+      - name: npm audit (high + critical)
+        run: |
+          npm audit --json > audit.json || true
+          npm audit --audit-level=high
+
+      - name: Upload rapport audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit
+          path: audit.json
+
+  # ═══════════════════════════════════════════════════════════════
+  # 4. SNYK - Scan approfondi des dépendances
+  # ═══════════════════════════════════════════════════════════════
   snyk:
     name: Scan dépendances Snyk
     runs-on: ubuntu-latest
@@ -91,8 +142,30 @@ jobs:
         with:
           sarif_file: snyk.sarif
 
-  owasp_audit:
-    name: Vérification OWASP (audit npm)
+  # ═══════════════════════════════════════════════════════════════
+  # 5. SECRET DETECTION - Détecte les secrets dans l'historique Git
+  #    Clés API, tokens, mots de passe accidentellement committés
+  # ═══════════════════════════════════════════════════════════════
+  secrets:
+    name: Détection de secrets (Gitleaks)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (historique complet)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ═══════════════════════════════════════════════════════════════
+  # 6. BUILD - Construit l'image Docker et la sauvegarde en artifact
+  # ═══════════════════════════════════════════════════════════════
+  build:
+    name: Build Docker
     runs-on: ubuntu-latest
     needs: tests
 
@@ -100,57 +173,150 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Build image Docker
+        run: docker build -t devsecops-app:${{ github.sha }} .
+
+      - name: Sauvegarder l'image en artifact
+        run: docker save devsecops-app:${{ github.sha }} > image.tar
+
+      - name: Upload artifact image
+        uses: actions/upload-artifact@v4
         with:
-          node-version: 20
-          cache: npm
+          name: docker-image
+          path: image.tar
 
-      - name: Installer les dépendances
-        run: npm install
-
-      - name: Audit de sécurité npm (high + critical)
-        run: npm audit --audit-level=high
-
-  docker_secure_build:
-    name: Build Docker et scan image
+  # ═══════════════════════════════════════════════════════════════
+  # 7. CONTAINER SCAN - Scan Trivy sur l'image Docker (toutes branches)
+  #    Détecte les CVE dans l'OS et les packages de l'image
+  # ═══════════════════════════════════════════════════════════════
+  container_scan:
+    name: Scan image Trivy
     runs-on: ubuntu-latest
-    needs: [semgrep, owasp_audit]
+    needs: build
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Télécharger l'artifact image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
 
+      - name: Charger l'image Docker
+        run: docker load < image.tar
+
+      - name: Scan Trivy (HIGH + CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: devsecops-app:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+  # ═══════════════════════════════════════════════════════════════
+  # 8. PUBLICATION GHCR - Pousse l'image sur main uniquement
+  # ═══════════════════════════════════════════════════════════════
+  docker_push:
+    name: Publication image GHCR
+    runs-on: ubuntu-latest
+    needs: [container_scan, sast, sca]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
       - name: Login GHCR
-        if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build image Docker
-        id: docker_build
-        uses: docker/build-push-action@v6
+      - name: Télécharger l'artifact image
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          push: ${{ github.ref == 'refs/heads/main' }}
-          tags: ghcr.io/${{ github.repository }}:latest
+          name: docker-image
 
-      - name: Scan image avec Trivy
-        if: github.ref == 'refs/heads/main'
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ghcr.io/${{ github.repository }}:latest
-          format: table
-          exit-code: '1'
-          ignore-unfixed: true
-          severity: HIGH,CRITICAL
+      - name: Charger et pousser l'image
+        run: |
+          docker load < image.tar
+          docker tag devsecops-app:${{ github.sha }} ghcr.io/${{ github.repository }}:latest
+          docker push ghcr.io/${{ github.repository }}:latest
 
-  compliance:
-    name: Vérifications de conformité
+  # ═══════════════════════════════════════════════════════════════
+  # 9. CODEQL - Analyse statique GitHub (Exercice 3)
+  #    Second outil SAST complémentaire à Semgrep
+  # ═══════════════════════════════════════════════════════════════
+  codeql:
+    name: CodeQL
     runs-on: ubuntu-latest
-    needs: [snyk, docker_secure_build]
+    needs: tests
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialiser CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyser avec CodeQL
+        uses: github/codeql-action/analyze@v3
+
+  # ═══════════════════════════════════════════════════════════════
+  # 10. SECURITY GATE - Bloque le merge si vulnérabilités critiques (Exercice 4)
+  #     S'exécute toujours (if: always()) pour synthétiser tous les résultats
+  # ═══════════════════════════════════════════════════════════════
+  security_gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+    needs: [sast, sca, snyk, secrets, container_scan, codeql]
+    if: always()
+
+    steps:
+      - name: Vérifier les résultats des scans
+        run: |
+          echo "═══════════════════════════════════════"
+          echo " Résultats des scans de sécurité :"
+          echo "  SAST (Semgrep)     : ${{ needs.sast.result }}"
+          echo "  SCA (npm audit)    : ${{ needs.sca.result }}"
+          echo "  Snyk               : ${{ needs.snyk.result }}"
+          echo "  Secrets (Gitleaks) : ${{ needs.secrets.result }}"
+          echo "  Container (Trivy)  : ${{ needs.container_scan.result }}"
+          echo "  CodeQL             : ${{ needs.codeql.result }}"
+          echo "═══════════════════════════════════════"
+
+          FAILED=0
+          for result in \
+            "${{ needs.sast.result }}" \
+            "${{ needs.container_scan.result }}" \
+            "${{ needs.secrets.result }}"; do
+            if [[ "$result" == "failure" ]]; then
+              FAILED=1
+            fi
+          done
+
+          if [[ "$FAILED" == "1" ]]; then
+            echo "❌ Vulnérabilités critiques détectées. Merge bloqué."
+            exit 1
+          else
+            echo "✅ Aucune vulnérabilité critique. Pipeline validé."
+          fi
+
+  # ═══════════════════════════════════════════════════════════════
+  # 11. COMPLIANCE + RAPPORT FINAL
+  #     Contrôles de conformité + rapport JSON en artifact
+  # ═══════════════════════════════════════════════════════════════
+  compliance:
+    name: Conformité et rapport final
+    runs-on: ubuntu-latest
+    needs: [sast, sca, snyk, secrets, container_scan, codeql, security_gate]
+    if: always()
 
     steps:
       - name: Checkout
@@ -161,14 +327,49 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: bash scripts/compliance-check.sh
 
+      - name: Générer le rapport JSON
+        run: |
+          cat > security-report.json <<EOF
+          {
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "repository": "${{ github.repository }}",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "workflow_run": "${{ github.run_id }}",
+            "results": {
+              "sast":           { "status": "${{ needs.sast.result }}",           "tool": "Semgrep" },
+              "sca":            { "status": "${{ needs.sca.result }}",            "tool": "npm audit" },
+              "snyk":           { "status": "${{ needs.snyk.result }}",           "tool": "Snyk" },
+              "secrets":        { "status": "${{ needs.secrets.result }}",        "tool": "Gitleaks" },
+              "container_scan": { "status": "${{ needs.container_scan.result }}", "tool": "Trivy" },
+              "codeql":         { "status": "${{ needs.codeql.result }}",         "tool": "CodeQL" },
+              "security_gate":  { "status": "${{ needs.security_gate.result }}",  "tool": "Security Gate" }
+            }
+          }
+          EOF
+          echo "📄 Rapport de sécurité généré :"
+          cat security-report.json
+
+      - name: Upload rapport JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: security-report.json
+
       - name: Résumé final du pipeline
         run: |
           {
-            echo "## Résumé DevSecOps";
-            echo "- Tests applicatifs : OK";
-            echo "- Scan Semgrep (SAST) : OK";
-            echo "- Scan Snyk (dépendances) : Voir rapport";
-            echo "- Vérification OWASP (npm audit) : OK";
-            echo "- Build + Scan Docker : OK";
-            echo "- Conformité : OK";
+            echo "## 🔒 Résumé DevSecOps"
+            echo ""
+            echo "| Outil | Type | Résultat |"
+            echo "|-------|------|----------|"
+            echo "| Semgrep | SAST | ${{ needs.sast.result }} |"
+            echo "| npm audit | SCA | ${{ needs.sca.result }} |"
+            echo "| Snyk | SCA | ${{ needs.snyk.result }} |"
+            echo "| Gitleaks | Secrets | ${{ needs.secrets.result }} |"
+            echo "| Trivy | Container | ${{ needs.container_scan.result }} |"
+            echo "| CodeQL | SAST | ${{ needs.codeql.result }} |"
+            echo "| Security Gate | Gate | ${{ needs.security_gate.result }} |"
+            echo ""
+            echo "📥 **Rapport JSON disponible dans les artefacts**"
           } >> "$GITHUB_STEP_SUMMARY"

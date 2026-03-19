@@ -2,6 +2,13 @@ const request = require('supertest');
 const { app } = require('../src/app');
 
 describe('Tests fonctionnels API', () => {
+  test('GET / retourne 200', async () => {
+    const response = await request(app).get('/');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.text).toContain('API DevSecOps active');
+  });
+
   test('GET /health retourne 200', async () => {
     const response = await request(app).get('/health');
 

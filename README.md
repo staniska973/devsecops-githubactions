@@ -1,4 +1,6 @@
-# TP DevSecOps - GitHub Actions (niveau débutant)
+# TP DevSecOps - GitHub Actions
+
+![Pipeline DevSecOps](https://github.com/staniska973/devsecops-githubactions/workflows/Pipeline%20DevSecOps/badge.svg)
 
 Ce dépôt contient un exemple de pipeline DevSecOps simple pour un TP de Mastère 1 Cybersécurité & IA.
 
@@ -24,13 +26,19 @@ npm start
 
 - `SNYK_TOKEN` : token API Snyk (obligatoire pour un scan Snyk complet)
 
+> Voir `.env.example` pour les variables d'environnement locales (ne jamais committer `.env`).
+
 ## Résultat attendu
 
 À chaque push / pull request, le pipeline lance :
 
-1. les tests,
-2. le scan Semgrep,
-3. le scan Snyk,
-4. l'audit npm,
-5. le build Docker (toutes branches) + scan Trivy sur `main`,
-6. les vérifications de conformité.
+1. **Tests** — fonctionnels + sécurité
+2. **SAST (Semgrep)** — OWASP Top 10, security-audit, secrets, règles custom
+3. **SCA (npm audit)** — CVE dans les dépendances
+4. **Snyk** — scan approfondi des dépendances
+5. **Gitleaks** — détection de secrets dans l'historique Git
+6. **Build Docker** — image sauvegardée en artifact (toutes branches)
+7. **Trivy** — scan de l'image Docker sur toutes les branches
+8. **CodeQL** — second outil SAST par GitHub
+9. **Security Gate** — bloque le merge si vulnérabilités critiques
+10. **Conformité + rapport JSON** — artifact téléchargeable depuis l'onglet Actions

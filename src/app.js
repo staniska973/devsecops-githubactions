@@ -22,6 +22,10 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
+app.get('/', (_req, res) => {
+  res.status(200).send('API DevSecOps active. Utilise /health ou POST /echo.');
+});
+
 app.post('/echo', (req, res) => {
   const message = sanitizeInput(req.body.message || '');
   res.status(200).json({ message });
