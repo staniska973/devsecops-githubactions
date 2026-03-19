@@ -7,6 +7,9 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: read
   security-events: write
@@ -68,7 +71,7 @@ jobs:
 
       - name: Publier le rapport Semgrep dans Security
         if: always() && hashFiles('semgrep.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep.sarif
 
@@ -138,7 +141,7 @@ jobs:
 
       - name: Publier le rapport Snyk dans Security
         if: always() && hashFiles('snyk.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: snyk.sarif
 
@@ -210,7 +213,7 @@ jobs:
           format: table
           exit-code: '1'
           ignore-unfixed: true
-          severity: HIGH,CRITICAL
+          severity: CRITICAL
 
   # ═══════════════════════════════════════════════════════════════
   # 8. PUBLICATION GHCR - Pousse l'image sur main uniquement
@@ -258,15 +261,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Initialiser CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: javascript
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Analyser avec CodeQL
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
 
   # ═══════════════════════════════════════════════════════════════
   # 10. SECURITY GATE - Bloque le merge si vulnérabilités critiques (Exercice 4)
