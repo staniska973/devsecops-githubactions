@@ -198,6 +198,12 @@ jobs:
     needs: build
 
     steps:
+      - name: Installer Trivy CLI
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin
+          trivy --version
+
       - name: Télécharger l'artifact image
         uses: actions/download-artifact@v4
         with:
@@ -207,14 +213,14 @@ jobs:
         run: docker load < image.tar
 
       - name: Générer le rapport Trivy (JSON)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: devsecops-app:${{ github.sha }}
-          format: json
-          output: trivy-report.json
-          exit-code: '0'
-          ignore-unfixed: true
-          severity: CRITICAL
+        run: |
+          trivy image \
+            --format json \
+            --output trivy-report.json \
+            --ignore-unfixed \
+            --severity CRITICAL \
+            --exit-code 0 \
+            devsecops-app:${{ github.sha }}
 
       - name: Upload rapport Trivy
         if: always()
@@ -224,13 +230,12 @@ jobs:
           path: trivy-report.json
 
       - name: Scan Trivy bloquant (CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: devsecops-app:${{ github.sha }}
-          format: table
-          exit-code: '1'
-          ignore-unfixed: true
-          severity: CRITICAL
+        run: |
+          trivy image \
+            --ignore-unfixed \
+            --severity CRITICAL \
+            --exit-code 1 \
+            devsecops-app:${{ github.sha }}
 
   # ═══════════════════════════════════════════════════════════════
   # 8. PUBLICATION GHCR - Pousse l'image sur main uniquement
