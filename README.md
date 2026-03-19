@@ -2,7 +2,6 @@
 
 ![Pipeline DevSecOps](https://github.com/staniska973/devsecops-githubactions/workflows/Pipeline%20DevSecOps/badge.svg)
 
-Ce dépôt contient un exemple de pipeline DevSecOps simple pour un TP de Mastère 1 Cybersécurité & IA.
 
 ## Contenu principal
 
