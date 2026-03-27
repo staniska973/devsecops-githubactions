@@ -9,7 +9,7 @@
     "test:security": "jest --runInBand tests/security.test.js"
   },
   "dependencies": {
-    "express": "^4.21.2",
+    "express": "^5.2.1",
     "helmet": "^8.1.0"
   },
   "devDependencies": {
